@@ -3,4 +3,27 @@ const assert=require('node:assert/strict');const {server,rooms,view,advance,reso
 let thief=r.players.find(p=>p.id===r.thief),citizen=r.players.find(p=>p.id!==r.thief);r.phase='night';r.turn=thief.number;r.end=Date.now()+8000;citizen.number=thief.number;assert.equal(view(r,citizen).stealer,r.thief);let sleeping=r.players.find(p=>p.id!==thief.id&&p.id!==citizen.id);sleeping.number=thief.number===6?1:6;assert.equal(view(r,sleeping).stealer,null);assert.equal(view(r,sleeping).gem,null);assert.ok(view(r,sleeping).players.every(p=>p.number===null&&p.role===null&&!p.open));assert.ok((await api({action:'beginVote',token:a.token})).error);
 r.phase='partner';let ti=r.players.indexOf(thief);await api({action:'partner',token:players[ti].token,target:citizen.id});assert.equal(r.partner,citizen.id);assert.equal(view(r,citizen).partner,true);assert.equal(view(r,citizen).role,'صاحب');assert.ok(view(r,citizen).players.every(p=>p.role===null));assert.ok(r.end-Date.now()>899000);assert.ok((await api({action:'beginVote',token:players[1].token})).error);assert.ok(!(await api({action:'beginVote',token:a.token})).error);assert.equal(r.phase,'vote');assert.ok((await api({action:'vote',token:a.token,target:r.players[0].id})).error);let vote=await api({action:'vote',token:a.token,target:r.players[1].id});assert.ok(!vote.error);assert.equal(view(r,r.players[2]).votes[r.players[0].id],r.players[1].id);assert.ok((await api({action:'vote',token:a.token,target:r.players[2].id})).error);
 r.votes=Object.fromEntries(r.players.map(p=>[p.id,r.thief]));resolve(r);assert.equal(r.caught,true);assert.ok(view(r,citizen).players.some(p=>p.role==='الآكل'));r.runoff=false;r.votes={[r.players[0].id]:r.players[1].id,[r.players[1].id]:r.players[0].id};resolve(r);assert.equal(r.phase,'tie');r.phase='vote';resolve(r);assert.equal(r.caught,false);r.phase='night';r.players[0].seen=Date.now()-8000;advance(r);assert.ok(r.pause);r.players[0].seen=Date.now();advance(r);assert.ok(!r.pause);r.players[0].seen=Date.now()-8000;advance(r);r.pause=Date.now()-120001;advance(r);assert.equal(r.cancelled,true);
+
+for(const capacity of [4,5,6,7,8]){
+ const host=await api({action:'create',name:'مضيف '+capacity,capacity});assert.equal(host.state.capacity,capacity);
+ const guests=[host];assert.ok((await api({action:'start',token:host.token,minutes:7})).error);
+ for(let j=1;j<capacity;j++)guests.push(await api({action:'join',name:'ضيف '+j,code:host.state.code}));
+ const room=rooms.get(host.state.code);assert.equal(new Set(room.players.map(p=>p.character)).size,capacity);
+ assert.ok((await api({action:'join',name:'زائد',code:room.code})).error);
+ assert.ok((await api({action:'capacity',token:guests[1].token,capacity:8})).error);
+ assert.ok((await api({action:'capacity',token:host.token,capacity:capacity-1})).error);
+ const crypto=require('crypto'),original=crypto.randomInt;
+ try{crypto.randomInt=(min,max)=>max===undefined?min-1:max-1;assert.ok(!(await api({action:'start',token:host.token,minutes:7})).error)}finally{crypto.randomInt=original}
+ assert.equal(room.thief,room.players[capacity-1].id);assert.ok(room.players.every(p=>p.number>=1&&p.number<=6));
+ assert.ok((await api({action:'capacity',token:host.token,capacity:8})).error);
+ room.phase='partner';room.end=0;advance(room);assert.ok(room.partner&&room.partner!==room.thief);assert.equal(room.phase,'discussion');
+ assert.ok(!(await api({action:'beginVote',token:host.token})).error);
+ for(let j=0;j<capacity;j++){let target=j===capacity-1?room.players[0].id:room.thief;const response=await api({action:'vote',token:guests[j].token,target});assert.ok(!response.error);assert.equal(room.phase,j===capacity-1?'result':'vote')}
+ assert.equal(room.caught,true);
+ room.phase='vote';room.runoff=false;room.votes=Object.fromEntries(room.players.map((p,i)=>[p.id,room.players[(i+1)%capacity].id]));resolve(room);assert.equal(room.phase,'tie');assert.equal(room.candidates.length,capacity);
+ if(capacity<8){room.phase='result';assert.ok(!(await api({action:'capacity',token:host.token,capacity:capacity+1})).error);assert.equal(room.phase,'lobby');assert.ok(!(await api({action:'join',name:'إضافة',code:room.code})).error)}
+}
+for(const capacity of [3,9,4.5,'bad'])assert.ok((await api({action:'create',name:'غير صالح',capacity})).error);
+let configurable=await api({action:'create',name:'تعديل'});assert.equal(configurable.state.capacity,6);for(const capacity of [4,8,5])assert.ok(!(await api({action:'capacity',token:configurable.token,capacity})).error);
+console.log('PASS: all room sizes 4–8, default six, capacity guards, eight unique avatars, last-seat eater eligibility, partner fallback, correct vote completion at every size, ties and adding seats between rounds.');
 for(const asset of ['/','/app.js','/style.css','/assets/characters.webp','/assets/room.webp'])assert.equal((await fetch(url.replace('/api',asset))).status,200);console.log('PASS: six-player rooms, unique character reservations, 15-minute discussion, host-only early vote, secret eyes/roles, witnessed eating, partner secrecy, public immutable votes, self-vote rejection, tie, disconnect/resume/cancel and assets.')}finally{server.close()}})().catch(e=>{console.error(e);process.exitCode=1});
